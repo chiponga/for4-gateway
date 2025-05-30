@@ -1,5 +1,5 @@
 // src/handlers/NovoCliente.js
-const Database = require('../database/Database');
+const Database = require('../config/database');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');

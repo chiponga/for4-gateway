@@ -8,8 +8,6 @@ const morgan = require('morgan');
 const fs = require('fs');
 const path = require('path');
 const bodyParser = require('body-parser');
-const bodyParserErrorHandler = require('express-body-parser-error-handler');
-const cron = require('node-cron');
 
 // Criação dos servidores
 const app = express();
@@ -22,7 +20,7 @@ const io = require('socket.io')(WebServer, {
 });
 
 // Importar componentes
-const Database = require('./database/Database');
+const Database = require('./config/database');
 const NovoCliente = require('./handlers/NovoCliente');
 
 const PORT = process.env.PORT || 5000;
@@ -46,7 +44,6 @@ app.use(cors({
 // Configuração de parsing do body
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
-app.use(bodyParserErrorHandler());
 
 // Middleware de logging
 app.use(morgan('combined'));
@@ -103,8 +100,7 @@ io.on('connection', (Socket) => {
   });
 });
 
-// Rota para servir imagens
-app.use('/images', express.static(imagesDir));
+
 
 // Health check
 app.get('/health', (req, res) => {
@@ -132,22 +128,6 @@ app.post('/webhook/pagamentos', async (req, res) => {
   }
 });
 
-// Agendamento de tarefas (cron jobs)
-cron.schedule('0 */12 * * *', async () => {
-  console.log('\n🕐 [CRON] === INÍCIO EXECUÇÃO ===');
-  console.log(`📅 Horário: ${new Date().toLocaleString('pt-BR')}`);
-  
-  try {
-    await new NovoCliente([], null).checkPendingPayments();
-    console.log('✅ [CRON] Verificação de pagamentos pendentes concluída');
-  } catch (error) {
-    console.error('❌ [CRON] Erro:', error);
-  }
-  
-  console.log('🕐 [CRON] === FIM EXECUÇÃO ===\n');
-}, {
-  timezone: "America/Sao_Paulo"
-});
 
 // Tratamento de erros globais
 process.on('uncaughtException', (err) => {
@@ -180,15 +160,7 @@ WebServer.listen(PORT, async () => {
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📱 Frontend: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  
-  // Carregar imagens iniciais
-  try {
-    const Query = "SELECT * FROM images";
-    const resultado = await db.query(Query);
-    console.log(`📸 Carregadas ${resultado.length} imagens`);
-  } catch (error) {
-    console.log('⚠️ Não foi possível carregar imagens iniciais:', error.message);
-  }
+
 });
 
 module.exports = { app, WebServer, io };
