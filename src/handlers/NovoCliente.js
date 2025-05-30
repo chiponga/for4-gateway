@@ -44,33 +44,33 @@ class NovoCliente {
     //=================================================================
     // MÉTODOS DE AUTENTICAÇÃO
     //=================================================================
-    
+
     async handleLogin() {
         try {
             const { email, password } = this.data;
-            
+
             if (!email || !password) {
                 return this.enviarResposta('LoginResponse', {
                     success: false,
                     message: 'Email e senha são obrigatórios'
                 });
             }
-            
+
             // Buscar usuário no banco
             const usuarios = await this.db.query(
                 'SELECT * FROM users WHERE email = ?',
                 [email]
             );
-            
+
             if (usuarios.length === 0) {
                 return this.enviarResposta('LoginResponse', {
                     success: false,
                     message: 'Credenciais inválidas'
                 });
             }
-            
+
             const usuario = usuarios[0];
-            
+
             // Verificar senha
             const senhaValida = await bcrypt.compare(password, usuario.password);
             if (!senhaValida) {
@@ -79,14 +79,14 @@ class NovoCliente {
                     message: 'Credenciais inválidas'
                 });
             }
-            
+
             // Gerar token JWT
             const token = jwt.sign(
                 { id: usuario.id, email: usuario.email },
                 process.env.JWT_SECRET,
                 { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
             );
-            
+
             this.enviarResposta('LoginResponse', {
                 success: true,
                 message: 'Login realizado com sucesso',
@@ -97,7 +97,7 @@ class NovoCliente {
                     email: usuario.email
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro no login:', error);
             this.enviarResposta('LoginResponse', {
@@ -110,48 +110,48 @@ class NovoCliente {
     async handleRegistro() {
         try {
             const { name, email, password } = this.data;
-            
+
             if (!name || !email || !password) {
                 return this.enviarResposta('RegistroResponse', {
                     success: false,
                     message: 'Nome, email e senha são obrigatórios'
                 });
             }
-            
+
             // Verificar se o email já existe
             const usuariosExistentes = await this.db.query(
                 'SELECT * FROM users WHERE email = ?',
                 [email]
             );
-            
+
             if (usuariosExistentes.length > 0) {
                 return this.enviarResposta('RegistroResponse', {
                     success: false,
                     message: 'Este email já está em uso'
                 });
             }
-            
+
             // Hash da senha
             const salt = await bcrypt.genSalt(10);
             const hashedPassword = await bcrypt.hash(password, salt);
-            
+
             // Inserir usuário no banco
             const resultado = await this.db.query(
                 'INSERT INTO users (name, email, password, status, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
                 [name, email, hashedPassword, 'active']
             );
-            
+
             // Criar configurações iniciais para o usuário
             await this.db.query(
                 'INSERT INTO user_settings (user_id, created_at, updated_at) VALUES (?, NOW(), NOW())',
                 [resultado.insertId]
             );
-            
+
             this.enviarResposta('RegistroResponse', {
                 success: true,
                 message: 'Conta criada com sucesso'
             });
-            
+
         } catch (error) {
             console.error('Erro no registro:', error);
             this.enviarResposta('RegistroResponse', {
@@ -164,14 +164,14 @@ class NovoCliente {
     async handleVerificarToken() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('VerificarTokenResponse', {
                     success: false,
                     message: 'Token inválido ou expirado'
                 });
             }
-            
+
             this.enviarResposta('VerificarTokenResponse', {
                 success: true,
                 user: {
@@ -180,7 +180,7 @@ class NovoCliente {
                     email: usuario.email
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro na verificação do token:', error);
             this.enviarResposta('VerificarTokenResponse', {
@@ -193,18 +193,18 @@ class NovoCliente {
     //=================================================================
     // MÉTODOS DE DASHBOARD
     //=================================================================
-    
+
     async handleDadosDashboard() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('DadosDashboardResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             // Buscar dados do dashboard
             const vendasHoje = await this.db.query(
                 `SELECT 
@@ -215,7 +215,7 @@ class NovoCliente {
                 AND DATE(created_at) = CURDATE()`,
                 [usuario.id]
             );
-            
+
             const vendasOntem = await this.db.query(
                 `SELECT 
                     SUM(amount) as value
@@ -224,7 +224,7 @@ class NovoCliente {
                 AND DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)`,
                 [usuario.id]
             );
-            
+
             const saldoDisponivel = await this.db.query(
                 `SELECT 
                     SUM(IF(category = 'income', amount, -amount)) as balance 
@@ -233,7 +233,7 @@ class NovoCliente {
                 AND status = 'completed'`,
                 [usuario.id]
             );
-            
+
             const saldoPendente = await this.db.query(
                 `SELECT 
                     SUM(IF(category = 'income', amount, -amount)) as balance 
@@ -242,7 +242,7 @@ class NovoCliente {
                 AND status = 'pending'`,
                 [usuario.id]
             );
-            
+
             const metaFaturamento = await this.db.query(
                 `SELECT 
                     SUM(amount) as current
@@ -253,7 +253,7 @@ class NovoCliente {
                 AND payment_status = 'paid'`,
                 [usuario.id]
             );
-            
+
             // Obter métodos de pagamento
             const metodosPagamento = await this.db.query(
                 `SELECT 
@@ -268,13 +268,13 @@ class NovoCliente {
                 GROUP BY payment_method`,
                 [usuario.id]
             );
-            
+
             // Calcular variação percentual em relação ao dia anterior
             const vendasHojeValor = vendasHoje[0].value || 0;
             const vendasOntemValor = vendasOntem[0].value || 0;
-            const variation = vendasOntemValor === 0 ? 0 : 
+            const variation = vendasOntemValor === 0 ? 0 :
                 Math.round(((vendasHojeValor - vendasOntemValor) / vendasOntemValor) * 100);
-            
+
             // Organizar métodos de pagamento
             const paymentMethods = {
                 pix: { percentage: 0, value: 0 },
@@ -282,49 +282,49 @@ class NovoCliente {
                 boleto: { percentage: 0, value: 0 },
                 crypto: { percentage: 0, value: 0 }
             };
-            
+
             const totalVendas = metodosPagamento.reduce((acc, method) => acc + (method.value || 0), 0);
-            
+
             metodosPagamento.forEach(method => {
-                const methodKey = method.payment_method.includes('pix') ? 'pix' : 
-                                 method.payment_method.includes('card') ? 'card' :
-                                 method.payment_method.includes('boleto') ? 'boleto' : 'crypto';
-                
+                const methodKey = method.payment_method.includes('pix') ? 'pix' :
+                    method.payment_method.includes('card') ? 'card' :
+                        method.payment_method.includes('boleto') ? 'boleto' : 'crypto';
+
                 paymentMethods[methodKey].value = method.value || 0;
-                paymentMethods[methodKey].percentage = totalVendas === 0 ? 0 : 
+                paymentMethods[methodKey].percentage = totalVendas === 0 ? 0 :
                     Math.round((method.value / totalVendas) * 100);
             });
-            
+
             // Meta de faturamento mensal (definida como 10000)
             const metaAtual = metaFaturamento[0].current || 0;
             const metaAlvo = 10000;
             const percentualMeta = Math.min(Math.round((metaAtual / metaAlvo) * 100), 100);
-            
+
             this.enviarResposta('DadosDashboardResponse', {
                 success: true,
                 data: {
-                    sales_today: { 
-                        value: vendasHojeValor, 
+                    sales_today: {
+                        value: vendasHojeValor,
                         variation: variation
                     },
                     available_balance: saldoDisponivel[0].balance || 0,
                     pending_balance: saldoPendente[0].balance || 0,
-                    billing_goal: { 
-                        current: metaAtual, 
-                        target: metaAlvo, 
+                    billing_goal: {
+                        current: metaAtual,
+                        target: metaAlvo,
                         percentage: percentualMeta
                     },
                     payment_methods: paymentMethods,
                     // Métricas adicionais
                     visitors_today: Math.floor(1000 + Math.random() * 500),
                     conversion_rate: 2.5 + (Math.random() * 2),
-                    average_ticket: vendasHoje[0].count > 0 ? 
+                    average_ticket: vendasHoje[0].count > 0 ?
                         vendasHojeValor / vendasHoje[0].count : 0,
                     active_products: Math.floor(40 + Math.random() * 20),
                     pending_count: Math.floor(3 + Math.random() * 10)
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar dados do dashboard:', error);
             this.enviarResposta('DadosDashboardResponse', {
@@ -337,17 +337,17 @@ class NovoCliente {
     async handlePerformanceDashboard() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('PerformanceDashboardResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             const { period = '7d' } = this.data;
             const periodDays = period === '30d' ? 30 : period === '15d' ? 15 : 7;
-            
+
             // Buscar dados de vendas por dia
             const vendasPorDia = await this.db.query(
                 `SELECT 
@@ -361,25 +361,25 @@ class NovoCliente {
                 ORDER BY date ASC`,
                 [usuario.id, periodDays]
             );
-            
+
             // Preparar arrays para o gráfico
             const labels = [];
             const revenue = [];
             const sales_count = [];
             const visitors = [];
             const conversions = [];
-            
+
             // Preencher dias faltantes
             for (let i = periodDays - 1; i >= 0; i--) {
                 const date = new Date();
                 date.setDate(date.getDate() - i);
                 const dateString = date.toISOString().split('T')[0];
-                
+
                 labels.push(dateString);
-                
+
                 // Encontrar dados para esta data
                 const dadosData = vendasPorDia.find(v => v.date === dateString);
-                
+
                 if (dadosData) {
                     revenue.push(Number(dadosData.revenue) || 0);
                     sales_count.push(Number(dadosData.sales_count) || 0);
@@ -387,13 +387,13 @@ class NovoCliente {
                     revenue.push(0);
                     sales_count.push(0);
                 }
-                
+
                 // Simular dados de visitantes e conversões
                 const baseVisitors = Math.floor(sales_count[sales_count.length - 1] * 12 + Math.random() * 100);
                 visitors.push(baseVisitors);
                 conversions.push(sales_count[sales_count.length - 1]);
             }
-            
+
             this.enviarResposta('PerformanceDashboardResponse', {
                 success: true,
                 data: {
@@ -405,7 +405,7 @@ class NovoCliente {
                     labels
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar performance:', error);
             this.enviarResposta('PerformanceDashboardResponse', {
@@ -418,14 +418,14 @@ class NovoCliente {
     async handleStatementDashboard() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('StatementDashboardResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             // Buscar transações recentes
             const transacoes = await this.db.query(
                 `SELECT 
@@ -442,30 +442,30 @@ class NovoCliente {
                 LIMIT 10`,
                 [usuario.id]
             );
-            
+
             // Formatar os dados
             const statements = transacoes.map(t => ({
                 id: t.id,
                 date: t.created_at,
                 type: t.type,
-                description: t.description || 
-                            (t.type === 'sale' ? `Venda: ${t.product_name || 'Produto'}` : 
-                             t.type === 'withdrawal' ? 'Saque' : 
-                             t.type === 'commission' ? 'Comissão de afiliado' : 
-                             t.type === 'refund' ? 'Reembolso' : t.type),
+                description: t.description ||
+                    (t.type === 'sale' ? `Venda: ${t.product_name || 'Produto'}` :
+                        t.type === 'withdrawal' ? 'Saque' :
+                            t.type === 'commission' ? 'Comissão de afiliado' :
+                                t.type === 'refund' ? 'Reembolso' : t.type),
                 amount: t.amount,
                 status: t.status,
                 customer: t.customer_name,
                 reference: t.gateway_transaction_id
             }));
-            
+
             this.enviarResposta('StatementDashboardResponse', {
                 success: true,
                 data: {
                     statements
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar extrato:', error);
             this.enviarResposta('StatementDashboardResponse', {
@@ -478,18 +478,18 @@ class NovoCliente {
     //=================================================================
     // MÉTODOS FINANCEIROS
     //=================================================================
-    
+
     async handleGetBalance() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('GetBalanceResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             // Buscar saldo disponível
             const saldoDisponivel = await this.db.query(
                 `SELECT 
@@ -499,7 +499,7 @@ class NovoCliente {
                 AND status = 'completed'`,
                 [usuario.id]
             );
-            
+
             // Buscar saldo pendente
             const saldoPendente = await this.db.query(
                 `SELECT 
@@ -509,7 +509,7 @@ class NovoCliente {
                 AND status = 'pending'`,
                 [usuario.id]
             );
-            
+
             // Buscar valor total de vendas aprovadas
             const vendasAprovadas = await this.db.query(
                 `SELECT 
@@ -519,7 +519,7 @@ class NovoCliente {
                 AND payment_status = 'paid'`,
                 [usuario.id]
             );
-            
+
             // Buscar valor total de comissões
             const comissoes = await this.db.query(
                 `SELECT 
@@ -530,7 +530,7 @@ class NovoCliente {
                 AND status = 'completed'`,
                 [usuario.id]
             );
-            
+
             // Buscar valor total de reembolsos
             const reembolsos = await this.db.query(
                 `SELECT 
@@ -541,7 +541,7 @@ class NovoCliente {
                 AND status = 'completed'`,
                 [usuario.id]
             );
-            
+
             // Buscar valor pendente de aprovação
             const pendentesAprovacao = await this.db.query(
                 `SELECT 
@@ -551,7 +551,7 @@ class NovoCliente {
                 AND payment_status = 'pending'`,
                 [usuario.id]
             );
-            
+
             // Buscar último saque
             const ultimoSaque = await this.db.query(
                 `SELECT 
@@ -563,10 +563,10 @@ class NovoCliente {
                 LIMIT 1`,
                 [usuario.id]
             );
-            
+
             const available = saldoDisponivel[0].available || 0;
             const pending = saldoPendente[0].pending || 0;
-            
+
             this.enviarResposta('GetBalanceResponse', {
                 success: true,
                 data: {
@@ -585,7 +585,7 @@ class NovoCliente {
                     } : null
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar saldo:', error);
             this.enviarResposta('GetBalanceResponse', {
@@ -598,14 +598,14 @@ class NovoCliente {
     async handleGetWithdrawals() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('GetWithdrawalsResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             // Buscar saques
             const saques = await this.db.query(
                 `SELECT 
@@ -622,7 +622,7 @@ class NovoCliente {
                 LIMIT 20`,
                 [usuario.id]
             );
-            
+
             // Formatar os dados
             const withdrawals = saques.map(s => ({
                 id: s.id,
@@ -636,12 +636,12 @@ class NovoCliente {
                 bank_account: `${s.bank_name} - Ag: ${s.agency} - Conta: ${s.account.substr(0, 3)}***${s.account.substr(-3)}`,
                 holder_name: s.holder_name
             }));
-            
+
             this.enviarResposta('GetWithdrawalsResponse', {
                 success: true,
                 data: withdrawals
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar saques:', error);
             this.enviarResposta('GetWithdrawalsResponse', {
@@ -654,36 +654,36 @@ class NovoCliente {
     async handleRequestWithdrawal() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('RequestWithdrawalResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             const { amount, bank_account_id } = this.data;
-            
+
             if (!amount || !bank_account_id) {
                 return this.enviarResposta('RequestWithdrawalResponse', {
                     success: false,
                     message: 'Valor e conta bancária são obrigatórios'
                 });
             }
-            
+
             // Verificar se a conta bancária pertence ao usuário
             const contasBancarias = await this.db.query(
                 'SELECT * FROM bank_accounts WHERE id = ? AND user_id = ?',
                 [bank_account_id, usuario.id]
             );
-            
+
             if (contasBancarias.length === 0) {
                 return this.enviarResposta('RequestWithdrawalResponse', {
                     success: false,
                     message: 'Conta bancária não encontrada'
                 });
             }
-            
+
             // Verificar se o usuário tem saldo suficiente
             const saldoDisponivel = await this.db.query(
                 `SELECT 
@@ -693,18 +693,18 @@ class NovoCliente {
                 AND status = 'completed'`,
                 [usuario.id]
             );
-            
+
             if ((saldoDisponivel[0].available || 0) < amount) {
                 return this.enviarResposta('RequestWithdrawalResponse', {
                     success: false,
                     message: 'Saldo insuficiente'
                 });
             }
-            
+
             // Calcular taxa (exemplo: 2%)
             const feeAmount = amount * 0.02;
             const netAmount = amount - feeAmount;
-            
+
             // Inserir solicitação de saque
             const resultado = await this.db.query(
                 `INSERT INTO withdrawals 
@@ -712,7 +712,7 @@ class NovoCliente {
                 VALUES (?, ?, ?, ?, ?, 'BRL', 'pending', NOW(), NOW())`,
                 [usuario.id, bank_account_id, amount, feeAmount, netAmount]
             );
-            
+
             // Criar transação para o saque
             await this.db.query(
                 `INSERT INTO transactions 
@@ -720,7 +720,7 @@ class NovoCliente {
                 VALUES (?, 'withdrawal', 'expense', ?, 'BRL', 'pending', 'Solicitação de saque', NOW(), NOW())`,
                 [usuario.id, amount]
             );
-            
+
             this.enviarResposta('RequestWithdrawalResponse', {
                 success: true,
                 message: 'Solicitação de saque realizada com sucesso',
@@ -732,7 +732,7 @@ class NovoCliente {
                     status: 'pending'
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao solicitar saque:', error);
             this.enviarResposta('RequestWithdrawalResponse', {
@@ -745,29 +745,29 @@ class NovoCliente {
     //=================================================================
     // MÉTODOS DE PRODUTOS
     //=================================================================
-    
+
     async handleGetProducts() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('GetProductsResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             // Buscar produtos
             const produtos = await this.db.query(
                 `SELECT * FROM products WHERE user_id = ? ORDER BY created_at DESC`,
                 [usuario.id]
             );
-            
+
             this.enviarResposta('GetProductsResponse', {
                 success: true,
                 data: produtos
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar produtos:', error);
             this.enviarResposta('GetProductsResponse', {
@@ -780,27 +780,27 @@ class NovoCliente {
     async handleCreateProduct() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('CreateProductResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
-            const { 
+
+            const {
                 name, description, type, price, category,
                 image, digital_file, stock_quantity = null,
                 allow_affiliates = false, commission_rate = 0
             } = this.data;
-            
+
             if (!name || !type || !price) {
                 return this.enviarResposta('CreateProductResponse', {
                     success: false,
                     message: 'Nome, tipo e preço são obrigatórios'
                 });
             }
-            
+
             // Processar imagem, se fornecida
             let image_url = null;
             if (image) {
@@ -809,11 +809,11 @@ class NovoCliente {
                 const imageExt = image.match(/data:image\/(\w+);/)[1];
                 const imageName = `product_${Date.now()}.${imageExt}`;
                 const imagePath = path.join(process.cwd(), 'uploads', 'imagens', imageName);
-                
+
                 fs.writeFileSync(imagePath, imageBuffer);
                 image_url = `/images/${imageName}`;
             }
-            
+
             // Processar arquivo digital, se fornecido
             let digital_file_url = null;
             if (digital_file && type === 'digital') {
@@ -822,17 +822,17 @@ class NovoCliente {
                 const fileExt = digital_file.match(/data:application\/(\w+);/)[1];
                 const fileName = `digital_${Date.now()}.${fileExt}`;
                 const filePath = path.join(process.cwd(), 'uploads', 'arquivos', fileName);
-                
+
                 // Garantir que o diretório existe
                 const dir = path.dirname(filePath);
                 if (!fs.existsSync(dir)) {
                     fs.mkdirSync(dir, { recursive: true });
                 }
-                
+
                 fs.writeFileSync(filePath, fileBuffer);
                 digital_file_url = `/files/${fileName}`;
             }
-            
+
             // Inserir produto
             const resultado = await this.db.query(
                 `INSERT INTO products 
@@ -840,12 +840,12 @@ class NovoCliente {
                 stock_quantity, track_stock, allow_affiliates, commission_rate, created_at, updated_at) 
                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 [
-                    usuario.id, name, description, type, category, price, 
-                    image_url, digital_file_url, stock_quantity, 
+                    usuario.id, name, description, type, category, price,
+                    image_url, digital_file_url, stock_quantity,
                     stock_quantity !== null, allow_affiliates, commission_rate
                 ]
             );
-            
+
             this.enviarResposta('CreateProductResponse', {
                 success: true,
                 message: 'Produto criado com sucesso',
@@ -856,7 +856,7 @@ class NovoCliente {
                     price
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao criar produto:', error);
             this.enviarResposta('CreateProductResponse', {
@@ -869,42 +869,42 @@ class NovoCliente {
     async handleUpdateProduct() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('UpdateProductResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
-            const { 
+
+            const {
                 id, name, description, type, price, category,
                 image, digital_file, stock_quantity,
                 allow_affiliates, commission_rate, status
             } = this.data;
-            
+
             if (!id || !name || !type || !price) {
                 return this.enviarResposta('UpdateProductResponse', {
                     success: false,
                     message: 'ID, nome, tipo e preço são obrigatórios'
                 });
             }
-            
+
             // Verificar se o produto pertence ao usuário
             const produtos = await this.db.query(
                 'SELECT * FROM products WHERE id = ? AND user_id = ?',
                 [id, usuario.id]
             );
-            
+
             if (produtos.length === 0) {
                 return this.enviarResposta('UpdateProductResponse', {
                     success: false,
                     message: 'Produto não encontrado'
                 });
             }
-            
+
             const produto = produtos[0];
-            
+
             // Processar imagem, se fornecida
             let image_url = produto.image_url;
             if (image && image.startsWith('data:image')) {
@@ -913,10 +913,10 @@ class NovoCliente {
                 const imageExt = image.match(/data:image\/(\w+);/)[1];
                 const imageName = `product_${Date.now()}.${imageExt}`;
                 const imagePath = path.join(process.cwd(), 'uploads', 'imagens', imageName);
-                
+
                 fs.writeFileSync(imagePath, imageBuffer);
                 image_url = `/images/${imageName}`;
-                
+
                 // Remover imagem antiga, se existir
                 if (produto.image_url && produto.image_url !== image_url) {
                     const oldImagePath = path.join(process.cwd(), produto.image_url.replace('/images/', 'uploads/imagens/'));
@@ -925,7 +925,7 @@ class NovoCliente {
                     }
                 }
             }
-            
+
             // Processar arquivo digital, se fornecido
             let digital_file_url = produto.digital_file_url;
             if (digital_file && digital_file.startsWith('data:') && type === 'digital') {
@@ -934,16 +934,16 @@ class NovoCliente {
                 const fileExt = digital_file.match(/data:application\/(\w+);/)[1];
                 const fileName = `digital_${Date.now()}.${fileExt}`;
                 const filePath = path.join(process.cwd(), 'uploads', 'arquivos', fileName);
-                
+
                 // Garantir que o diretório existe
                 const dir = path.dirname(filePath);
                 if (!fs.existsSync(dir)) {
                     fs.mkdirSync(dir, { recursive: true });
                 }
-                
+
                 fs.writeFileSync(filePath, fileBuffer);
                 digital_file_url = `/files/${fileName}`;
-                
+
                 // Remover arquivo antigo, se existir
                 if (produto.digital_file_url && produto.digital_file_url !== digital_file_url) {
                     const oldFilePath = path.join(process.cwd(), produto.digital_file_url.replace('/files/', 'uploads/arquivos/'));
@@ -952,7 +952,7 @@ class NovoCliente {
                     }
                 }
             }
-            
+
             // Atualizar produto
             await this.db.query(
                 `UPDATE products SET
@@ -972,12 +972,12 @@ class NovoCliente {
                 WHERE id = ? AND user_id = ?`,
                 [
                     name, description, type, category, price, status || produto.status,
-                    image_url, digital_file_url, stock_quantity, 
+                    image_url, digital_file_url, stock_quantity,
                     stock_quantity !== null, allow_affiliates, commission_rate,
                     id, usuario.id
                 ]
             );
-            
+
             this.enviarResposta('UpdateProductResponse', {
                 success: true,
                 message: 'Produto atualizado com sucesso',
@@ -989,7 +989,7 @@ class NovoCliente {
                     status: status || produto.status
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao atualizar produto:', error);
             this.enviarResposta('UpdateProductResponse', {
@@ -1002,51 +1002,51 @@ class NovoCliente {
     async handleDeleteProduct() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('DeleteProductResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             const { id } = this.data;
-            
+
             if (!id) {
                 return this.enviarResposta('DeleteProductResponse', {
                     success: false,
                     message: 'ID do produto é obrigatório'
                 });
             }
-            
+
             // Verificar se o produto pertence ao usuário
             const produtos = await this.db.query(
                 'SELECT * FROM products WHERE id = ? AND user_id = ?',
                 [id, usuario.id]
             );
-            
+
             if (produtos.length === 0) {
                 return this.enviarResposta('DeleteProductResponse', {
                     success: false,
                     message: 'Produto não encontrado'
                 });
             }
-            
+
             const produto = produtos[0];
-            
+
             // Verificar se há pedidos associados a este produto
             const pedidos = await this.db.query(
                 'SELECT COUNT(*) as total FROM orders WHERE product_id = ?',
                 [id]
             );
-            
+
             if (pedidos[0].total > 0) {
                 // Não excluir, apenas inativar o produto
                 await this.db.query(
                     'UPDATE products SET status = ?, updated_at = NOW() WHERE id = ?',
                     ['inactive', id]
                 );
-                
+
                 this.enviarResposta('DeleteProductResponse', {
                     success: true,
                     message: 'Produto inativado com sucesso. Não foi possível excluir pois existem pedidos associados a ele.'
@@ -1059,26 +1059,26 @@ class NovoCliente {
                         fs.unlinkSync(imagePath);
                     }
                 }
-                
+
                 if (produto.digital_file_url) {
                     const filePath = path.join(process.cwd(), produto.digital_file_url.replace('/files/', 'uploads/arquivos/'));
                     if (fs.existsSync(filePath)) {
                         fs.unlinkSync(filePath);
                     }
                 }
-                
+
                 // Excluir produto
                 await this.db.query(
                     'DELETE FROM products WHERE id = ?',
                     [id]
                 );
-                
+
                 this.enviarResposta('DeleteProductResponse', {
                     success: true,
                     message: 'Produto excluído com sucesso'
                 });
             }
-            
+
         } catch (error) {
             console.error('Erro ao excluir produto:', error);
             this.enviarResposta('DeleteProductResponse', {
@@ -1091,21 +1091,21 @@ class NovoCliente {
     //=================================================================
     // MÉTODOS DE PEDIDOS/TRANSAÇÕES
     //=================================================================
-    
+
     async handleGetOrders() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('GetOrdersResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             const { page = 1, limit = 10, status } = this.data;
             const offset = (page - 1) * limit;
-            
+
             // Construir query base
             let query = `
                 SELECT 
@@ -1116,34 +1116,34 @@ class NovoCliente {
                 LEFT JOIN products p ON o.product_id = p.id
                 WHERE o.user_id = ?
             `;
-            
+
             const queryParams = [usuario.id];
-            
+
             // Adicionar filtro de status, se fornecido
             if (status) {
                 query += ' AND o.payment_status = ?';
                 queryParams.push(status);
             }
-            
+
             // Adicionar ordenação e paginação
             query += ' ORDER BY o.created_at DESC LIMIT ? OFFSET ?';
             queryParams.push(parseInt(limit), offset);
-            
+
             // Buscar pedidos
             const pedidos = await this.db.query(query, queryParams);
-            
+
             // Contar total de pedidos (para paginação)
             let countQuery = 'SELECT COUNT(*) as total FROM orders WHERE user_id = ?';
             const countParams = [usuario.id];
-            
+
             if (status) {
                 countQuery += ' AND payment_status = ?';
                 countParams.push(status);
             }
-            
+
             const contagem = await this.db.query(countQuery, countParams);
             const total = contagem[0].total;
-            
+
             this.enviarResposta('GetOrdersResponse', {
                 success: true,
                 data: {
@@ -1156,7 +1156,7 @@ class NovoCliente {
                     }
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar pedidos:', error);
             this.enviarResposta('GetOrdersResponse', {
@@ -1169,17 +1169,17 @@ class NovoCliente {
     async handleGetTransactions() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('GetTransactionsResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             const { page = 1, limit = 10, type } = this.data;
             const offset = (page - 1) * limit;
-            
+
             // Construir query base
             let query = `
                 SELECT 
@@ -1192,34 +1192,34 @@ class NovoCliente {
                 LEFT JOIN products p ON o.product_id = p.id
                 WHERE t.user_id = ?
             `;
-            
+
             const queryParams = [usuario.id];
-            
+
             // Adicionar filtro de tipo, se fornecido
             if (type) {
                 query += ' AND t.type = ?';
                 queryParams.push(type);
             }
-            
+
             // Adicionar ordenação e paginação
             query += ' ORDER BY t.created_at DESC LIMIT ? OFFSET ?';
             queryParams.push(parseInt(limit), offset);
-            
+
             // Buscar transações
             const transacoes = await this.db.query(query, queryParams);
-            
+
             // Contar total de transações (para paginação)
             let countQuery = 'SELECT COUNT(*) as total FROM transactions WHERE user_id = ?';
             const countParams = [usuario.id];
-            
+
             if (type) {
                 countQuery += ' AND type = ?';
                 countParams.push(type);
             }
-            
+
             const contagem = await this.db.query(countQuery, countParams);
             const total = contagem[0].total;
-            
+
             this.enviarResposta('GetTransactionsResponse', {
                 success: true,
                 data: {
@@ -1232,7 +1232,7 @@ class NovoCliente {
                     }
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar transações:', error);
             this.enviarResposta('GetTransactionsResponse', {
@@ -1245,42 +1245,42 @@ class NovoCliente {
     async handleProcessPayment() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('ProcessPaymentResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
-            const { 
-                product_id, payment_method, customer_name, 
+
+            const {
+                product_id, payment_method, customer_name,
                 customer_email, customer_phone, customer_document,
                 payment_details
             } = this.data;
-            
+
             if (!product_id || !payment_method || !customer_name || !customer_email) {
                 return this.enviarResposta('ProcessPaymentResponse', {
                     success: false,
                     message: 'Dados incompletos para processamento do pagamento'
                 });
             }
-            
+
             // Buscar produto
             const produtos = await this.db.query(
                 'SELECT * FROM products WHERE id = ?',
                 [product_id]
             );
-            
+
             if (produtos.length === 0) {
                 return this.enviarResposta('ProcessPaymentResponse', {
                     success: false,
                     message: 'Produto não encontrado'
                 });
             }
-            
+
             const produto = produtos[0];
-            
+
             // Verificar estoque, se for produto físico com controle de estoque
             if (produto.type === 'physical' && produto.track_stock) {
                 if (produto.stock_quantity <= 0) {
@@ -1290,10 +1290,10 @@ class NovoCliente {
                     });
                 }
             }
-            
+
             // Gerar transação no gateway (simulado)
             const transactionId = 'tx_' + uuidv4().replace(/-/g, '');
-            
+
             // Inserir pedido
             const resultadoPedido = await this.db.query(
                 `INSERT INTO orders 
@@ -1309,7 +1309,7 @@ class NovoCliente {
                     JSON.stringify(payment_details || {}), this.socket.handshake.address
                 ]
             );
-            
+
             // Criar transação pendente
             await this.db.query(
                 `INSERT INTO transactions 
@@ -1317,7 +1317,7 @@ class NovoCliente {
                 VALUES (?, ?, 'sale', 'income', ?, 'BRL', 'pending', 'Venda aguardando pagamento', NOW(), NOW())`,
                 [usuario.id, resultadoPedido.insertId, produto.price]
             );
-            
+
             // Atualizar estoque, se aplicável
             if (produto.type === 'physical' && produto.track_stock) {
                 await this.db.query(
@@ -1325,7 +1325,7 @@ class NovoCliente {
                     [product_id]
                 );
             }
-            
+
             // Para pagamento PIX, gerar QR Code (simulado)
             let pixData = null;
             if (payment_method === 'pix') {
@@ -1335,7 +1335,7 @@ class NovoCliente {
                     expiration_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 horas
                 };
             }
-            
+
             this.enviarResposta('ProcessPaymentResponse', {
                 success: true,
                 message: 'Pagamento em processamento',
@@ -1348,7 +1348,7 @@ class NovoCliente {
                     pix_data: pixData
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao processar pagamento:', error);
             this.enviarResposta('ProcessPaymentResponse', {
@@ -1361,30 +1361,30 @@ class NovoCliente {
     //=================================================================
     // MÉTODOS DE PERFIL E CONFIGURAÇÕES
     //=================================================================
-    
+
     async handleGetProfile() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('GetProfileResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             // Buscar configurações do usuário
             const configuracoes = await this.db.query(
                 'SELECT * FROM user_settings WHERE user_id = ?',
                 [usuario.id]
             );
-            
+
             // Buscar contas bancárias
             const contasBancarias = await this.db.query(
                 'SELECT * FROM bank_accounts WHERE user_id = ?',
                 [usuario.id]
             );
-            
+
             this.enviarResposta('GetProfileResponse', {
                 success: true,
                 data: {
@@ -1404,7 +1404,7 @@ class NovoCliente {
                     bank_accounts: contasBancarias
                 }
             });
-            
+
         } catch (error) {
             console.error('Erro ao buscar perfil:', error);
             this.enviarResposta('GetProfileResponse', {
@@ -1417,58 +1417,58 @@ class NovoCliente {
     async handleUpdateProfile() {
         try {
             const usuario = await this.validarToken();
-            
+
             if (!usuario) {
                 return this.enviarResposta('UpdateProfileResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
-            
+
             const { name, phone, document, birth_date, avatar, password, current_password } = this.data;
-            
+
             // Campos para atualização
             const updateFields = [];
             const updateValues = [];
-            
+
             if (name) {
                 updateFields.push('name = ?');
                 updateValues.push(name);
             }
-            
+
             if (phone) {
                 updateFields.push('phone = ?');
                 updateValues.push(phone);
             }
-            
+
             if (document) {
                 updateFields.push('document = ?');
                 updateValues.push(document);
             }
-            
+
             if (birth_date) {
                 updateFields.push('birth_date = ?');
                 updateValues.push(birth_date);
             }
-            
+
             if (avatar) {
                 // Salvar avatar (base64) como arquivo
                 const avatarBuffer = Buffer.from(avatar.split(',')[1], 'base64');
                 const avatarExt = avatar.match(/data:image\/(\w+);/)[1];
                 const avatarName = `avatar_${usuario.id}_${Date.now()}.${avatarExt}`;
                 const avatarPath = path.join(process.cwd(), 'uploads', 'avatars', avatarName);
-                
+
                 // Garantir que o diretório existe
                 const dir = path.dirname(avatarPath);
                 if (!fs.existsSync(dir)) {
                     fs.mkdirSync(dir, { recursive: true });
                 }
-                
+
                 fs.writeFileSync(avatarPath, avatarBuffer);
-                
+
                 updateFields.push('avatar = ?');
                 updateValues.push(`/avatars/${avatarName}`);
-                
+
                 // Remover avatar antigo, se existir
                 if (usuario.avatar) {
                     const oldAvatarPath = path.join(process.cwd(), usuario.avatar.replace('/avatars/', 'uploads/avatars/'));
@@ -1477,7 +1477,7 @@ class NovoCliente {
                     }
                 }
             }
-            
+
             // Atualizar senha, se fornecida
             if (password && current_password) {
                 // Verificar senha atual
@@ -1488,43 +1488,669 @@ class NovoCliente {
                         message: 'Senha atual incorreta'
                     });
                 }
-                
+
                 // Hash da nova senha
                 const salt = await bcrypt.genSalt(10);
                 const hashedPassword = await bcrypt.hash(password, salt);
-                
+
                 updateFields.push('password = ?');
                 updateValues.push(hashedPassword);
             }
-            
+
             if (updateFields.length === 0) {
                 return this.enviarResposta('UpdateProfileResponse', {
                     success: false,
                     message: 'Nenhum campo para atualizar'
                 });
             }
-            
+
             // Adicionar data de atualização
             updateFields.push('updated_at = NOW()');
-            
+
             // Montar query de atualização
             const updateQuery = `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`;
             updateValues.push(usuario.id);
-            
+
             // Atualizar usuário
             await this.db.query(updateQuery, updateValues);
-            
+
             this.enviarResposta('UpdateProfileResponse', {
                 success: true,
                 message: 'Perfil atualizado com sucesso'
             });
-            
+
         } catch (error) {
             console.error('Erro ao atualizar perfil:', error);
             this.enviarResposta('UpdateProfileResponse', {
                 success: false,
                 message: 'Erro ao atualizar perfil'
             });
+        }
+    }
+
+    // Adicione estes métodos à classe NovoCliente no arquivo src/handlers/NovoCliente.js
+
+    //=================================================================
+    // MÉTODOS DE CONFIGURAÇÕES
+    //=================================================================
+
+    async handleUpdateSettings() {
+        try {
+            const usuario = await this.validarToken();
+
+            if (!usuario) {
+                return this.enviarResposta('UpdateSettingsResponse', {
+                    success: false,
+                    message: 'Usuário não autenticado'
+                });
+            }
+
+            const {
+                notification_email, notification_sms, notification_push,
+                theme, language, timezone, currency, fee_display,
+                auto_withdrawal, auto_withdrawal_amount, auto_withdrawal_day
+            } = this.data;
+
+            // Campos para atualização
+            const updateFields = [];
+            const updateValues = [];
+
+            if (notification_email !== undefined) {
+                updateFields.push('notification_email = ?');
+                updateValues.push(notification_email);
+            }
+
+            if (notification_sms !== undefined) {
+                updateFields.push('notification_sms = ?');
+                updateValues.push(notification_sms);
+            }
+
+            if (notification_push !== undefined) {
+                updateFields.push('notification_push = ?');
+                updateValues.push(notification_push);
+            }
+
+            if (theme) {
+                updateFields.push('theme = ?');
+                updateValues.push(theme);
+            }
+
+            if (language) {
+                updateFields.push('language = ?');
+                updateValues.push(language);
+            }
+
+            if (timezone) {
+                updateFields.push('timezone = ?');
+                updateValues.push(timezone);
+            }
+
+            if (currency) {
+                updateFields.push('currency = ?');
+                updateValues.push(currency);
+            }
+
+            if (fee_display) {
+                updateFields.push('fee_display = ?');
+                updateValues.push(fee_display);
+            }
+
+            if (auto_withdrawal !== undefined) {
+                updateFields.push('auto_withdrawal = ?');
+                updateValues.push(auto_withdrawal);
+            }
+
+            if (auto_withdrawal_amount !== undefined) {
+                updateFields.push('auto_withdrawal_amount = ?');
+                updateValues.push(auto_withdrawal_amount);
+            }
+
+            if (auto_withdrawal_day !== undefined) {
+                updateFields.push('auto_withdrawal_day = ?');
+                updateValues.push(auto_withdrawal_day);
+            }
+
+            if (updateFields.length === 0) {
+                return this.enviarResposta('UpdateSettingsResponse', {
+                    success: false,
+                    message: 'Nenhum campo para atualizar'
+                });
+            }
+
+            // Adicionar data de atualização
+            updateFields.push('updated_at = NOW()');
+
+            // Verificar se já existem configurações para o usuário
+            const configuracaoExistente = await this.db.query(
+                'SELECT id FROM user_settings WHERE user_id = ?',
+                [usuario.id]
+            );
+
+            if (configuracaoExistente.length > 0) {
+                // Atualizar configurações existentes
+                const updateQuery = `UPDATE user_settings SET ${updateFields.join(', ')} WHERE user_id = ?`;
+                updateValues.push(usuario.id);
+
+                await this.db.query(updateQuery, updateValues);
+            } else {
+                // Criar novas configurações com valores padrão
+                await this.db.query(
+                    `INSERT INTO user_settings 
+                    (user_id, notification_email, notification_sms, notification_push, theme, language, 
+                     timezone, currency, fee_display, auto_withdrawal, auto_withdrawal_amount, 
+                     auto_withdrawal_day, created_at, updated_at) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                    [
+                        usuario.id,
+                        notification_email !== undefined ? notification_email : true,
+                        notification_sms !== undefined ? notification_sms : false,
+                        notification_push !== undefined ? notification_push : true,
+                        theme || 'light',
+                        language || 'pt_BR',
+                        timezone || 'America/Sao_Paulo',
+                        currency || 'BRL',
+                        fee_display || 'included',
+                        auto_withdrawal !== undefined ? auto_withdrawal : false,
+                        auto_withdrawal_amount !== undefined ? auto_withdrawal_amount : 0.00,
+                        auto_withdrawal_day !== undefined ? auto_withdrawal_day : 1
+                    ]
+                );
+            }
+
+            this.enviarResposta('UpdateSettingsResponse', {
+                success: true,
+                message: 'Configurações atualizadas com sucesso'
+            });
+
+        } catch (error) {
+            console.error('Erro ao atualizar configurações:', error);
+            this.enviarResposta('UpdateSettingsResponse', {
+                success: false,
+                message: 'Erro ao atualizar configurações'
+            });
+        }
+    }
+
+    //=================================================================
+    // MÉTODOS DE AFILIADOS
+    //=================================================================
+
+    async handleGetAffiliates() {
+        try {
+            const usuario = await this.validarToken();
+
+            if (!usuario) {
+                return this.enviarResposta('GetAffiliatesResponse', {
+                    success: false,
+                    message: 'Usuário não autenticado'
+                });
+            }
+
+            // Buscar afiliados patrocinados por este usuário
+            const afiliados = await this.db.query(
+                `SELECT 
+                    affiliates.*,
+                    users.name,
+                    users.email,
+                    users.phone,
+                    users.created_at
+                FROM affiliates
+                INNER JOIN users ON affiliates.user_id = users.id
+                WHERE affiliates.sponsor_id = ?
+                ORDER BY affiliates.created_at DESC`,
+                [usuario.id]
+            );
+
+            // Buscar informações de afiliado do próprio usuário (se ele for afiliado)
+            const meuAfiliado = await this.db.query(
+                `SELECT 
+                    affiliates.*,
+                    users.name,
+                    users.email
+                FROM affiliates
+                LEFT JOIN users ON affiliates.sponsor_id = users.id
+                WHERE affiliates.user_id = ?`,
+                [usuario.id]
+            );
+
+            // Buscar estatísticas gerais
+            const estatisticas = await this.db.query(
+                `SELECT 
+                    COUNT(*) as total_affiliates,
+                    SUM(total_sales) as total_network_sales,
+                    SUM(total_commission) as total_network_commission
+                FROM affiliates 
+                WHERE sponsor_id = ?`,
+                [usuario.id]
+            );
+
+            // Buscar top afiliados do mês
+            const topAfiliados = await this.db.query(
+                `SELECT 
+                    affiliates.affiliate_code,
+                    users.name,
+                    SUM(orders.commission_amount) as monthly_commission,
+                    COUNT(orders.id) as monthly_sales
+                FROM affiliates
+                INNER JOIN users ON affiliates.user_id = users.id
+                LEFT JOIN orders ON orders.affiliate_id = affiliates.user_id 
+                    AND MONTH(orders.created_at) = MONTH(CURRENT_DATE())
+                    AND YEAR(orders.created_at) = YEAR(CURRENT_DATE())
+                    AND orders.payment_status = 'paid'
+                WHERE affiliates.sponsor_id = ?
+                GROUP BY affiliates.id, users.name
+                ORDER BY monthly_commission DESC
+                LIMIT 5`,
+                [usuario.id]
+            );
+
+            this.enviarResposta('GetAffiliatesResponse', {
+                success: true,
+                data: {
+                    affiliates: afiliados,
+                    my_affiliate: meuAfiliado.length > 0 ? meuAfiliado[0] : null,
+                    statistics: {
+                        total_affiliates: estatisticas[0].total_affiliates || 0,
+                        total_network_sales: estatisticas[0].total_network_sales || 0,
+                        total_network_commission: estatisticas[0].total_network_commission || 0
+                    },
+                    top_affiliates: topAfiliados
+                }
+            });
+
+        } catch (error) {
+            console.error('Erro ao buscar afiliados:', error);
+            this.enviarResposta('GetAffiliatesResponse', {
+                success: false,
+                message: 'Erro ao carregar dados de afiliados'
+            });
+        }
+    }
+
+    async handleAddAffiliate() {
+        try {
+            const usuario = await this.validarToken();
+
+            if (!usuario) {
+                return this.enviarResposta('AddAffiliateResponse', {
+                    success: false,
+                    message: 'Usuário não autenticado'
+                });
+            }
+
+            const { email, commission_rate = 10.00 } = this.data;
+
+            if (!email) {
+                return this.enviarResposta('AddAffiliateResponse', {
+                    success: false,
+                    message: 'Email é obrigatório'
+                });
+            }
+
+            // Verificar se o usuário com este email existe
+            const usuarioAfiliado = await this.db.query(
+                'SELECT * FROM users WHERE email = ?',
+                [email]
+            );
+
+            if (usuarioAfiliado.length === 0) {
+                return this.enviarResposta('AddAffiliateResponse', {
+                    success: false,
+                    message: 'Usuário não encontrado com este email'
+                });
+            }
+
+            const afiliado = usuarioAfiliado[0];
+
+            // Verificar se o usuário não está tentando se adicionar como afiliado
+            if (afiliado.id === usuario.id) {
+                return this.enviarResposta('AddAffiliateResponse', {
+                    success: false,
+                    message: 'Você não pode se adicionar como afiliado'
+                });
+            }
+
+            // Verificar se já existe um registro de afiliado para este usuário
+            const afiliadoExistente = await this.db.query(
+                'SELECT * FROM affiliates WHERE user_id = ?',
+                [afiliado.id]
+            );
+
+            if (afiliadoExistente.length > 0) {
+                return this.enviarResposta('AddAffiliateResponse', {
+                    success: false,
+                    message: 'Este usuário já é afiliado de alguém'
+                });
+            }
+
+            // Gerar código de afiliado único
+            let affiliateCode;
+            let codeExists = true;
+            let tentativas = 0;
+
+            while (codeExists && tentativas < 10) {
+                affiliateCode = 'AFF' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+                const codigoExistente = await this.db.query(
+                    'SELECT id FROM affiliates WHERE affiliate_code = ?',
+                    [affiliateCode]
+                );
+
+                codeExists = codigoExistente.length > 0;
+                tentativas++;
+            }
+
+            if (codeExists) {
+                return this.enviarResposta('AddAffiliateResponse', {
+                    success: false,
+                    message: 'Erro ao gerar código de afiliado. Tente novamente.'
+                });
+            }
+
+            // Inserir afiliado
+            const resultado = await this.db.query(
+                `INSERT INTO affiliates 
+                (user_id, sponsor_id, affiliate_code, commission_rate, status, joined_at, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, 'active', NOW(), NOW(), NOW())`,
+                [afiliado.id, usuario.id, affiliateCode, commission_rate]
+            );
+
+            this.enviarResposta('AddAffiliateResponse', {
+                success: true,
+                message: 'Afiliado adicionado com sucesso',
+                data: {
+                    id: resultado.insertId,
+                    affiliate_code: affiliateCode,
+                    user_name: afiliado.name,
+                    user_email: afiliado.email,
+                    commission_rate: commission_rate
+                }
+            });
+
+        } catch (error) {
+            console.error('Erro ao adicionar afiliado:', error);
+            this.enviarResposta('AddAffiliateResponse', {
+                success: false,
+                message: 'Erro ao adicionar afiliado'
+            });
+        }
+    }
+
+    async handleRemoveAffiliate() {
+        try {
+            const usuario = await this.validarToken();
+
+            if (!usuario) {
+                return this.enviarResposta('RemoveAffiliateResponse', {
+                    success: false,
+                    message: 'Usuário não autenticado'
+                });
+            }
+
+            const { affiliate_id } = this.data;
+
+            if (!affiliate_id) {
+                return this.enviarResposta('RemoveAffiliateResponse', {
+                    success: false,
+                    message: 'ID do afiliado é obrigatório'
+                });
+            }
+
+            // Verificar se o afiliado pertence a este sponsor
+            const afiliados = await this.db.query(
+                'SELECT * FROM affiliates WHERE id = ? AND sponsor_id = ?',
+                [affiliate_id, usuario.id]
+            );
+
+            if (afiliados.length === 0) {
+                return this.enviarResposta('RemoveAffiliateResponse', {
+                    success: false,
+                    message: 'Afiliado não encontrado'
+                });
+            }
+
+            const afiliado = afiliados[0];
+
+            // Verificar se há vendas/comissões associadas
+            const vendasAssociadas = await this.db.query(
+                'SELECT COUNT(*) as total FROM orders WHERE affiliate_id = ?',
+                [afiliado.user_id]
+            );
+
+            if (vendasAssociadas[0].total > 0) {
+                // Se há vendas, apenas inativar o afiliado
+                await this.db.query(
+                    'UPDATE affiliates SET status = ?, updated_at = NOW() WHERE id = ?',
+                    ['inactive', affiliate_id]
+                );
+
+                this.enviarResposta('RemoveAffiliateResponse', {
+                    success: true,
+                    message: 'Afiliado desativado com sucesso. Não foi possível excluir pois existem vendas associadas.'
+                });
+            } else {
+                // Se não há vendas, excluir completamente
+                await this.db.query(
+                    'DELETE FROM affiliates WHERE id = ?',
+                    [affiliate_id]
+                );
+
+                this.enviarResposta('RemoveAffiliateResponse', {
+                    success: true,
+                    message: 'Afiliado removido com sucesso'
+                });
+            }
+
+        } catch (error) {
+            console.error('Erro ao remover afiliado:', error);
+            this.enviarResposta('RemoveAffiliateResponse', {
+                success: false,
+                message: 'Erro ao remover afiliado'
+            });
+        }
+    }
+
+    //=================================================================
+    // MÉTODO DE WEBHOOK DE PAGAMENTO (ADICIONAL)
+    //=================================================================
+
+    async handlePaymentWebhook() {
+        try {
+            const { event, payment } = this.data;
+
+            console.log(`[WEBHOOK] Evento recebido: ${event}`, payment);
+
+            if (event === 'PAYMENT_UPDATED' && payment) {
+                const { transaction_id, status, amount, gateway_provider } = payment;
+
+                if (!transaction_id) {
+                    console.error('[WEBHOOK] Transaction ID não fornecido');
+                    return;
+                }
+
+                // Buscar pedido pelo transaction_id
+                const pedidos = await this.db.query(
+                    'SELECT * FROM orders WHERE gateway_transaction_id = ?',
+                    [transaction_id]
+                );
+
+                if (pedidos.length === 0) {
+                    console.error(`[WEBHOOK] Pedido não encontrado para transaction_id: ${transaction_id}`);
+                    return;
+                }
+
+                const pedido = pedidos[0];
+
+                // Mapear status do webhook para nosso sistema
+                let novoStatus;
+                switch (status) {
+                    case 'approved':
+                    case 'paid':
+                    case 'completed':
+                        novoStatus = 'paid';
+                        break;
+                    case 'cancelled':
+                    case 'canceled':
+                        novoStatus = 'cancelled';
+                        break;
+                    case 'refunded':
+                        novoStatus = 'refunded';
+                        break;
+                    case 'chargeback':
+                        novoStatus = 'chargeback';
+                        break;
+                    default:
+                        novoStatus = 'pending';
+                }
+
+                // Atualizar status do pedido
+                await this.db.query(
+                    `UPDATE orders SET 
+                        payment_status = ?, 
+                        order_status = ?,
+                        paid_at = ?,
+                        updated_at = NOW() 
+                    WHERE id = ?`,
+                    [
+                        novoStatus,
+                        novoStatus === 'paid' ? 'completed' : pedido.order_status,
+                        novoStatus === 'paid' ? new Date() : null,
+                        pedido.id
+                    ]
+                );
+
+                // Atualizar transação correspondente
+                await this.db.query(
+                    `UPDATE transactions SET 
+                        status = ?, 
+                        processed_at = ?,
+                        updated_at = NOW() 
+                    WHERE order_id = ?`,
+                    [
+                        novoStatus === 'paid' ? 'completed' :
+                            novoStatus === 'cancelled' ? 'cancelled' : 'failed',
+                        novoStatus === 'paid' ? new Date() : null,
+                        pedido.id
+                    ]
+                );
+
+                // Se pagamento aprovado, processar comissões de afiliado
+                if (novoStatus === 'paid' && pedido.affiliate_id) {
+                    await this.processarComissaoAfiliado(pedido);
+                }
+
+                // Se pagamento aprovado, atualizar estatísticas do produto
+                if (novoStatus === 'paid') {
+                    await this.atualizarEstatisticasProduto(pedido);
+                }
+
+                // Log do webhook processado
+                await this.db.query(
+                    `INSERT INTO webhooks 
+                    (user_id, provider, event, payload, status, processed_at, created_at, updated_at) 
+                    VALUES (?, ?, ?, ?, 'processed', NOW(), NOW(), NOW())`,
+                    [
+                        pedido.user_id,
+                        gateway_provider || 'unknown',
+                        event,
+                        JSON.stringify(this.data)
+                    ]
+                );
+
+                console.log(`[WEBHOOK] Pagamento processado com sucesso: ${transaction_id} - Status: ${novoStatus}`);
+            }
+
+        } catch (error) {
+            console.error('[WEBHOOK] Erro ao processar webhook de pagamento:', error);
+
+            // Log do erro no webhook
+            try {
+                await this.db.query(
+                    `INSERT INTO webhooks 
+                    (provider, event, payload, status, error_message, created_at, updated_at) 
+                    VALUES (?, ?, ?, 'failed', ?, NOW(), NOW())`,
+                    [
+                        this.data.payment?.gateway_provider || 'unknown',
+                        this.data.event || 'unknown',
+                        JSON.stringify(this.data),
+                        error.message
+                    ]
+                );
+            } catch (logError) {
+                console.error('[WEBHOOK] Erro ao salvar log de erro:', logError);
+            }
+        }
+    }
+
+    //=================================================================
+    // MÉTODOS AUXILIARES PARA WEBHOOKS
+    //=================================================================
+
+    async processarComissaoAfiliado(pedido) {
+        try {
+            // Buscar dados do afiliado
+            const afiliados = await this.db.query(
+                'SELECT * FROM affiliates WHERE user_id = ?',
+                [pedido.affiliate_id]
+            );
+
+            if (afiliados.length === 0) {
+                console.log(`[WEBHOOK] Afiliado não encontrado: ${pedido.affiliate_id}`);
+                return;
+            }
+
+            const afiliado = afiliados[0];
+            const comissaoValor = (pedido.amount * afiliado.commission_rate) / 100;
+
+            // Criar transação de comissão
+            await this.db.query(
+                `INSERT INTO transactions 
+                (user_id, order_id, type, category, amount, currency, status, description, created_at, updated_at) 
+                VALUES (?, ?, 'commission', 'income', ?, ?, 'completed', 'Comissão de afiliado', NOW(), NOW())`,
+                [pedido.affiliate_id, pedido.id, comissaoValor, pedido.currency]
+            );
+
+            // Atualizar estatísticas do afiliado
+            await this.db.query(
+                `UPDATE affiliates SET 
+                    total_sales = total_sales + ?,
+                    total_commission = total_commission + ?,
+                    total_conversions = total_conversions + 1,
+                    updated_at = NOW()
+                WHERE user_id = ?`,
+                [pedido.amount, comissaoValor, pedido.affiliate_id]
+            );
+
+            console.log(`[WEBHOOK] Comissão processada: ${comissaoValor} para afiliado ${pedido.affiliate_id}`);
+
+        } catch (error) {
+            console.error('[WEBHOOK] Erro ao processar comissão de afiliado:', error);
+        }
+    }
+
+    async atualizarEstatisticasProduto(pedido) {
+        try {
+            // Reduzir estoque se for produto físico com controle de estoque
+            const produtos = await this.db.query(
+                'SELECT * FROM products WHERE id = ?',
+                [pedido.product_id]
+            );
+
+            if (produtos.length > 0) {
+                const produto = produtos[0];
+
+                if (produto.type === 'physical' && produto.track_stock && produto.stock_quantity > 0) {
+                    await this.db.query(
+                        'UPDATE products SET stock_quantity = stock_quantity - 1, updated_at = NOW() WHERE id = ?',
+                        [pedido.product_id]
+                    );
+
+                    console.log(`[WEBHOOK] Estoque atualizado para produto ${pedido.product_id}`);
+                }
+            }
+
+        } catch (error) {
+            console.error('[WEBHOOK] Erro ao atualizar estatísticas do produto:', error);
         }
     }
 
