@@ -14,11 +14,13 @@ const app = express();
 const WebServer = require('http').createServer(app);
 const io = require('socket.io')(WebServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"]
+    origin: process.env.FRONTEND_URL || '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
   }
 });
-
+const { Criptografar, Descriptografar } = require('./utils/crypto');
 // Importar componentes
 const Database = require('./config/database');
 const NovoCliente = require('./handlers/NovoCliente');
@@ -37,7 +39,9 @@ if (!fs.existsSync(imagesDir)) {
 // Middlewares de segurança
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: process.env.FRONTEND_URL || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
 
@@ -59,13 +63,19 @@ io.on('connection', (Socket) => {
 
   // Eventos de autenticação
   Socket.on('Login', (data) => new NovoCliente(data, Socket).handleLogin());
-  Socket.on('EnviarRegistro', (data) => new NovoCliente(data, Socket).handleRegistro());
+  Socket.on('Register', (data) => new NovoCliente(data, Socket).handleRegistro());
   Socket.on('VerificarToken', (data) => new NovoCliente(data, Socket).handleVerificarToken());
+  Socket.on('ForgotPassword', (data) => new NovoCliente(data, Socket).handleForgotPassword());
+  Socket.on('ResetPassword', (data) => new NovoCliente(data, Socket).handleResetPassword());
+  
+  
 
   // Eventos do Dashboard
   Socket.on('DadosDashboard', (data) => new NovoCliente(data, Socket).handleDadosDashboard());
   Socket.on('PerformanceDashboard', (data) => new NovoCliente(data, Socket).handlePerformanceDashboard());
   Socket.on('StatementDashboard', (data) => new NovoCliente(data, Socket).handleStatementDashboard());
+  Socket.on('GetNotifications', (data) => new NovoCliente(data, Socket).handleGetNotifications());
+  Socket.on('MarkNotificationRead', (data) => new NovoCliente(data, Socket).handleMarkNotificationRead());
 
   // Eventos financeiros
   Socket.on('GetBalance', (data) => new NovoCliente(data, Socket).handleGetBalance());
@@ -116,11 +126,11 @@ app.post('/webhook/pagamentos', async (req, res) => {
   try {
     const { event, payment } = req.body;
     console.log(`Webhook recebido: ${event}`);
-    
+
     if (event === 'PAYMENT_UPDATED') {
       await new NovoCliente(req.body, null).handlePaymentWebhook();
     }
-    
+
     res.sendStatus(200);
   } catch (error) {
     console.error('Erro no webhook:', error);

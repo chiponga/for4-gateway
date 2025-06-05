@@ -5,10 +5,33 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { Criptografar, Descriptografar } = require('../utils/crypto');
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false, // true para 465, false para outros ports
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    },
+    tls: {
+        rejectUnauthorized: false
+    }
+});
 
 class NovoCliente {
     constructor(data, socket) {
-        this.data = data || {};
+
+        // Descriptografa e faz parse do JSON
+        try {
+            this.data = JSON.parse(Descriptografar(data));
+            //console.log(this.data)
+        } catch (err) {
+            console.error("❌ Erro ao descriptografar dados:", err);
+            this.data = {};
+        }
         this.socket = socket;
         this.db = new Database();
         this.usuarioLogado = null;
@@ -16,9 +39,10 @@ class NovoCliente {
 
     // Método para enviar resposta pelo socket
     enviarResposta(evento, dados) {
-        if (this.socket) {
-            this.socket.emit(evento, dados);
-        }
+        if (!this.socket) return;
+        // Criptografa o objeto JSON antes de enviar
+        const payload = Criptografar(JSON.stringify(dados));
+        this.socket.emit(evento, payload);
     }
 
     // Método para validar token e obter usuário
@@ -28,10 +52,12 @@ class NovoCliente {
             if (!token) return null;
 
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
             const usuarios = await this.db.query(
                 'SELECT * FROM users WHERE id = ?',
                 [decoded.id]
             );
+
 
             if (usuarios.length === 0) return null;
             return usuarios[0];
@@ -61,6 +87,8 @@ class NovoCliente {
                 'SELECT * FROM users WHERE email = ?',
                 [email]
             );
+
+
 
             if (usuarios.length === 0) {
                 return this.enviarResposta('LoginResponse', {
@@ -107,59 +135,146 @@ class NovoCliente {
         }
     }
 
+
     async handleRegistro() {
         try {
-            const { name, email, password } = this.data;
+            const { email, companyName, cnpj, phone, password, confirmPassword } = this.data;
 
-            if (!name || !email || !password) {
-                return this.enviarResposta('RegistroResponse', {
+            // Validações básicas
+            if (!email || !companyName || !cnpj || !phone || !password || !confirmPassword) {
+                return this.enviarResposta('RegisterResponse', {
                     success: false,
-                    message: 'Nome, email e senha são obrigatórios'
+                    message: 'Todos os campos são obrigatórios'
+                });
+            }
+
+            // Validar se as senhas coincidem
+            if (password !== confirmPassword) {
+                return this.enviarResposta('RegisterResponse', {
+                    success: false,
+                    message: 'As senhas não coincidem'
+                });
+            }
+
+            // Validar formato do email
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return this.enviarResposta('RegisterResponse', {
+                    success: false,
+                    message: 'Email inválido'
+                });
+            }
+
+            // Validar CNPJ (formato básico)
+            const cnpjClean = cnpj.replace(/\D/g, '');
+            if (cnpjClean.length !== 14) {
+                return this.enviarResposta('RegisterResponse', {
+                    success: false,
+                    message: 'CNPJ inválido'
+                });
+            }
+
+            // Validar senha (mínimo 6 caracteres)
+            if (password.length < 6) {
+                return this.enviarResposta('RegisterResponse', {
+                    success: false,
+                    message: 'A senha deve ter pelo menos 6 caracteres'
                 });
             }
 
             // Verificar se o email já existe
-            const usuariosExistentes = await this.db.query(
-                'SELECT * FROM users WHERE email = ?',
+            const emailExistente = await this.db.query(
+                'SELECT id FROM users WHERE email = ?',
                 [email]
             );
 
-            if (usuariosExistentes.length > 0) {
-                return this.enviarResposta('RegistroResponse', {
+            if (emailExistente.length > 0) {
+                return this.enviarResposta('RegisterResponse', {
                     success: false,
-                    message: 'Este email já está em uso'
+                    message: 'Este email já está cadastrado'
                 });
             }
 
-            // Hash da senha
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(password, salt);
+            // Verificar se o CNPJ já existe
+            const cnpjExistente = await this.db.query(
+                'SELECT id FROM users WHERE cnpj = ?',
+                [cnpj]
+            );
+
+            if (cnpjExistente.length > 0) {
+                return this.enviarResposta('RegisterResponse', {
+                    success: false,
+                    message: 'Este CNPJ já está cadastrado'
+                });
+            }
+
+            // Criptografar a senha
+            const saltRounds = 10;
+            const hashedPassword = await bcrypt.hash(password, saltRounds);
 
             // Inserir usuário no banco
             const resultado = await this.db.query(
-                'INSERT INTO users (name, email, password, status, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
-                [name, email, hashedPassword, 'active']
+                `INSERT INTO users (
+                name, 
+                email, 
+                password, 
+                phone, 
+                company_name, 
+                cnpj, 
+                document_type,
+                terms_accepted, 
+                terms_accepted_at,
+                status,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [
+                    companyName, // usando company_name como name por enquanto
+                    email,
+                    hashedPassword,
+                    phone,
+                    companyName,
+                    cnpj,
+                    'pessoa_juridica',
+                    true,
+                    new Date(),
+                    'pending' // ou 'active' se não precisar de verificação
+                ]
             );
 
-            // Criar configurações iniciais para o usuário
-            await this.db.query(
-                'INSERT INTO user_settings (user_id, created_at, updated_at) VALUES (?, NOW(), NOW())',
-                [resultado.insertId]
+            const userId = resultado.insertId;
+
+            // Gerar token JWT
+            const token = jwt.sign(
+                { id: userId, email: email },
+                process.env.JWT_SECRET,
+                { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
             );
 
-            this.enviarResposta('RegistroResponse', {
+            this.enviarResposta('RegisterResponse', {
                 success: true,
-                message: 'Conta criada com sucesso'
+                message: 'Conta criada com sucesso!',
+                token,
+                user: {
+                    id: userId,
+                    name: companyName,
+                    email: email,
+                    company_name: companyName,
+                    cnpj: cnpj,
+                    phone: phone
+                }
             });
 
         } catch (error) {
             console.error('Erro no registro:', error);
-            this.enviarResposta('RegistroResponse', {
+            this.enviarResposta('RegisterResponse', {
                 success: false,
                 message: 'Erro interno do servidor'
             });
         }
     }
+
+
 
     async handleVerificarToken() {
         try {
@@ -198,84 +313,126 @@ class NovoCliente {
         try {
             const usuario = await this.validarToken();
 
+
+
             if (!usuario) {
+
                 return this.enviarResposta('DadosDashboardResponse', {
                     success: false,
                     message: 'Usuário não autenticado'
                 });
             }
 
-            // Buscar dados do dashboard
+            // 1. VENDAS HOJE
             const vendasHoje = await this.db.query(
                 `SELECT 
-                    SUM(amount) as value, 
-                    COUNT(*) as count 
-                FROM orders 
-                WHERE user_id = ? 
-                AND DATE(created_at) = CURDATE()`,
+                SUM(net_amount) as value, 
+                COUNT(*) as count 
+            FROM orders 
+            WHERE user_id = ? 
+            AND payment_status = 'paid'
+            AND DATE(paid_at) = CURDATE()`,
                 [usuario.id]
             );
 
+            // 2. VENDAS ONTEM (para comparação)
             const vendasOntem = await this.db.query(
                 `SELECT 
-                    SUM(amount) as value
-                FROM orders 
-                WHERE user_id = ? 
-                AND DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)`,
+                SUM(net_amount) as value
+            FROM orders 
+            WHERE user_id = ? 
+            AND payment_status = 'paid'
+            AND DATE(paid_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)`,
                 [usuario.id]
             );
 
+            // 3. SALDO DISPONÍVEL
             const saldoDisponivel = await this.db.query(
                 `SELECT 
-                    SUM(IF(category = 'income', amount, -amount)) as balance 
-                FROM transactions 
-                WHERE user_id = ? 
-                AND status = 'completed'`,
+                COALESCE(SUM(CASE 
+                    WHEN category = 'income' AND status = 'completed' THEN amount
+                    WHEN category = 'expense' AND status = 'completed' THEN -amount
+                    ELSE 0 
+                END), 0) as balance 
+            FROM transactions 
+            WHERE user_id = ?`,
                 [usuario.id]
             );
 
+            // 4. SALDO PENDENTE
             const saldoPendente = await this.db.query(
                 `SELECT 
-                    SUM(IF(category = 'income', amount, -amount)) as balance 
-                FROM transactions 
-                WHERE user_id = ? 
-                AND status = 'pending'`,
+                COALESCE(SUM(CASE 
+                    WHEN category = 'income' AND status = 'pending' THEN amount
+                    WHEN category = 'expense' AND status = 'pending' THEN -amount
+                    ELSE 0 
+                END), 0) as balance 
+            FROM transactions 
+            WHERE user_id = ?`,
                 [usuario.id]
             );
 
+            // 5. META DE FATURAMENTO DO MÊS
             const metaFaturamento = await this.db.query(
                 `SELECT 
-                    SUM(amount) as current
-                FROM orders 
-                WHERE user_id = ? 
-                AND MONTH(created_at) = MONTH(CURRENT_DATE())
-                AND YEAR(created_at) = YEAR(CURRENT_DATE())
-                AND payment_status = 'paid'`,
+                COALESCE(SUM(net_amount), 0) as current
+            FROM orders 
+            WHERE user_id = ? 
+            AND payment_status = 'paid'
+            AND MONTH(paid_at) = MONTH(CURRENT_DATE())
+            AND YEAR(paid_at) = YEAR(CURRENT_DATE())`,
                 [usuario.id]
             );
 
-            // Obter métodos de pagamento
+            // 6. MÉTODOS DE PAGAMENTO DO MÊS
             const metodosPagamento = await this.db.query(
                 `SELECT 
-                    payment_method, 
-                    SUM(amount) as value,
-                    COUNT(*) as count
-                FROM orders 
-                WHERE user_id = ? 
-                AND payment_status = 'paid'
-                AND MONTH(created_at) = MONTH(CURRENT_DATE())
-                AND YEAR(created_at) = YEAR(CURRENT_DATE())
-                GROUP BY payment_method`,
+                payment_method, 
+                COALESCE(SUM(net_amount), 0) as value,
+                COUNT(*) as count
+            FROM orders 
+            WHERE user_id = ? 
+            AND payment_status = 'paid'
+            AND MONTH(paid_at) = MONTH(CURRENT_DATE())
+            AND YEAR(paid_at) = YEAR(CURRENT_DATE())
+            GROUP BY payment_method`,
                 [usuario.id]
             );
 
-            // Calcular variação percentual em relação ao dia anterior
-            const vendasHojeValor = vendasHoje[0].value || 0;
-            const vendasOntemValor = vendasOntem[0].value || 0;
-            const variation = vendasOntemValor === 0 ? 0 :
-                Math.round(((vendasHojeValor - vendasOntemValor) / vendasOntemValor) * 100);
+            // 7. ANALYTICS DE HOJE (visitantes, conversões, etc)
+            const analyticsHoje = await this.db.query(
+                `SELECT *
+            FROM analytics_daily 
+            WHERE user_id = ? 
+            AND date = CURDATE()`,
+                [usuario.id]
+            );
 
-            // Organizar métodos de pagamento
+            // 8. PRODUTOS ATIVOS
+            const produtosAtivos = await this.db.query(
+                `SELECT COUNT(*) as count
+            FROM products 
+            WHERE user_id = ? 
+            AND status = 'active'`,
+                [usuario.id]
+            );
+
+            // 9. PENDÊNCIAS (pedidos aguardando pagamento)
+            const pendencias = await this.db.query(
+                `SELECT COUNT(*) as count
+            FROM orders 
+            WHERE user_id = ? 
+            AND payment_status = 'pending'`,
+                [usuario.id]
+            );
+
+            // Calcular variação das vendas
+            const vendasHojeValor = vendasHoje[0]?.value || 0;
+            const vendasOntemValor = vendasOntem[0]?.value || 0;
+            const variation = vendasOntemValor === 0 ? 0 :
+                ((vendasHojeValor - vendasOntemValor) / vendasOntemValor) * 100;
+
+            // Processar métodos de pagamento
             const paymentMethods = {
                 pix: { percentage: 0, value: 0 },
                 card: { percentage: 0, value: 0 },
@@ -286,42 +443,76 @@ class NovoCliente {
             const totalVendas = metodosPagamento.reduce((acc, method) => acc + (method.value || 0), 0);
 
             metodosPagamento.forEach(method => {
-                const methodKey = method.payment_method.includes('pix') ? 'pix' :
-                    method.payment_method.includes('card') ? 'card' :
-                        method.payment_method.includes('boleto') ? 'boleto' : 'crypto';
+                let methodKey;
+                switch (method.payment_method) {
+                    case 'pix':
+                        methodKey = 'pix';
+                        break;
+                    case 'credit_card':
+                    case 'debit_card':
+                        methodKey = 'card';
+                        break;
+                    case 'boleto':
+                        methodKey = 'boleto';
+                        break;
+                    case 'crypto':
+                        methodKey = 'crypto';
+                        break;
+                    default:
+                        methodKey = 'card';
+                }
 
-                paymentMethods[methodKey].value = method.value || 0;
+                paymentMethods[methodKey].value += method.value || 0;
                 paymentMethods[methodKey].percentage = totalVendas === 0 ? 0 :
-                    Math.round((method.value / totalVendas) * 100);
+                    Math.round((paymentMethods[methodKey].value / totalVendas) * 100);
             });
 
-            // Meta de faturamento mensal (definida como 10000)
-            const metaAtual = metaFaturamento[0].current || 0;
-            const metaAlvo = 10000;
+            // Meta de faturamento
+            const metaAtual = metaFaturamento[0]?.current || 0;
+            const metaAlvo = 10000; // Pode vir de configurações do usuário
             const percentualMeta = Math.min(Math.round((metaAtual / metaAlvo) * 100), 100);
+
+            // Analytics
+            const analytics = analyticsHoje[0] || {
+                visitors: 0,
+                conversion_rate: 0,
+                orders_count: 0,
+                average_order_value: 0
+            };
 
             this.enviarResposta('DadosDashboardResponse', {
                 success: true,
                 data: {
+                    // Vendas hoje
                     sales_today: {
                         value: vendasHojeValor,
-                        variation: variation
+                        variation: variation,
+                        count: vendasHoje[0]?.count || 0
                     },
-                    available_balance: saldoDisponivel[0].balance || 0,
-                    pending_balance: saldoPendente[0].balance || 0,
+
+                    // Saldos
+                    available_balance: saldoDisponivel[0]?.balance || 0,
+                    pending_balance: saldoPendente[0]?.balance || 0,
+
+                    // Meta de faturamento
                     billing_goal: {
                         current: metaAtual,
                         target: metaAlvo,
                         percentage: percentualMeta
                     },
+
+                    // Métodos de pagamento
                     payment_methods: paymentMethods,
+
                     // Métricas adicionais
-                    visitors_today: Math.floor(1000 + Math.random() * 500),
-                    conversion_rate: 2.5 + (Math.random() * 2),
-                    average_ticket: vendasHoje[0].count > 0 ?
-                        vendasHojeValor / vendasHoje[0].count : 0,
-                    active_products: Math.floor(40 + Math.random() * 20),
-                    pending_count: Math.floor(3 + Math.random() * 10)
+                    visitors_today: analytics.visitors || 0,
+                    conversion_rate: analytics.conversion_rate || 0,
+                    average_ticket: analytics.average_order_value || 0,
+                    active_products: produtosAtivos[0]?.count || 0,
+                    pending_count: pendencias[0]?.count || 0,
+
+                    // Meta de timestamp para cache
+                    last_updated: new Date().toISOString()
                 }
             });
 
@@ -346,63 +537,86 @@ class NovoCliente {
             }
 
             const { period = '7d' } = this.data;
-            const periodDays = period === '30d' ? 30 : period === '15d' ? 15 : 7;
+            const periodDays = period === '30d' ? 30 : period === '15d' ? 15 : period === '7d' ? 7 : 1;
 
-            // Buscar dados de vendas por dia
-            const vendasPorDia = await this.db.query(
+            // Buscar dados de analytics por dia
+            const analytics = await this.db.query(
                 `SELECT 
-                    DATE(created_at) as date,
-                    SUM(amount) as revenue,
-                    COUNT(*) as sales_count
-                FROM orders 
-                WHERE user_id = ? 
-                AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                GROUP BY DATE(created_at)
-                ORDER BY date ASC`,
+                date,
+                visitors,
+                pageviews,
+                conversions,
+                conversion_rate,
+                revenue,
+                orders_count as sales_count,
+                average_order_value,
+                pix_amount,
+                card_amount,
+                boleto_amount,
+                crypto_amount
+            FROM analytics_daily 
+            WHERE user_id = ? 
+            AND date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+            ORDER BY date ASC`,
                 [usuario.id, periodDays]
             );
 
-            // Preparar arrays para o gráfico
-            const labels = [];
-            const revenue = [];
-            const sales_count = [];
-            const visitors = [];
-            const conversions = [];
+            // Se não há dados de analytics, buscar dos pedidos
+            if (analytics.length === 0) {
+                const vendasPorDia = await this.db.query(
+                    `SELECT 
+                    DATE(paid_at) as date,
+                    COALESCE(SUM(net_amount), 0) as revenue,
+                    COUNT(*) as sales_count,
+                    COALESCE(AVG(net_amount), 0) as average_order_value
+                FROM orders 
+                WHERE user_id = ? 
+                AND payment_status = 'paid'
+                AND paid_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                GROUP BY DATE(paid_at)
+                ORDER BY date ASC`,
+                    [usuario.id, periodDays]
+                );
 
-            // Preencher dias faltantes
-            for (let i = periodDays - 1; i >= 0; i--) {
-                const date = new Date();
-                date.setDate(date.getDate() - i);
-                const dateString = date.toISOString().split('T')[0];
+                // Converter para formato esperado
+                const processedData = vendasPorDia.map(item => ({
+                    date: item.date,
+                    visitors: Math.floor(item.sales_count * 15 + Math.random() * 50), // Simular visitantes
+                    revenue: parseFloat(item.revenue),
+                    sales_count: parseInt(item.sales_count),
+                    conversions: parseInt(item.sales_count),
+                    average_order_value: parseFloat(item.average_order_value),
+                    conversion_rate: 2.5 + (Math.random() * 2) // Simular taxa de conversão
+                }));
 
-                labels.push(dateString);
-
-                // Encontrar dados para esta data
-                const dadosData = vendasPorDia.find(v => v.date === dateString);
-
-                if (dadosData) {
-                    revenue.push(Number(dadosData.revenue) || 0);
-                    sales_count.push(Number(dadosData.sales_count) || 0);
-                } else {
-                    revenue.push(0);
-                    sales_count.push(0);
-                }
-
-                // Simular dados de visitantes e conversões
-                const baseVisitors = Math.floor(sales_count[sales_count.length - 1] * 12 + Math.random() * 100);
-                visitors.push(baseVisitors);
-                conversions.push(sales_count[sales_count.length - 1]);
+                return this.enviarResposta('PerformanceDashboardResponse', {
+                    success: true,
+                    data: {
+                        period,
+                        analytics: processedData,
+                        labels: processedData.map(item => item.date)
+                    }
+                });
             }
+
+            // Processar dados reais de analytics
+            const processedAnalytics = analytics.map(item => ({
+                date: item.date,
+                visitors: item.visitors || 0,
+                pageviews: item.pageviews || 0,
+                revenue: parseFloat(item.revenue) || 0,
+                sales_count: item.sales_count || 0,
+                conversions: item.conversions || 0,
+                conversion_rate: parseFloat(item.conversion_rate) || 0,
+                average_order_value: parseFloat(item.average_order_value) || 0
+            }));
 
             this.enviarResposta('PerformanceDashboardResponse', {
                 success: true,
                 data: {
                     period,
-                    revenue,
-                    sales_count,
-                    visitors,
-                    conversions,
-                    labels
+                    analytics: processedAnalytics,
+                    labels: processedAnalytics.map(item => item.date)
                 }
             });
 
@@ -415,6 +629,7 @@ class NovoCliente {
         }
     }
 
+
     async handleStatementDashboard() {
         try {
             const usuario = await this.validarToken();
@@ -426,43 +641,47 @@ class NovoCliente {
                 });
             }
 
-            // Buscar transações recentes
+            // Buscar transações recentes com mais detalhes
             const transacoes = await this.db.query(
-                `SELECT 
-                    t.*,
-                    o.gateway_transaction_id,
-                    o.customer_name,
-                    o.product_id,
-                    p.name as product_name
-                FROM transactions t
-                LEFT JOIN orders o ON t.order_id = o.id
-                LEFT JOIN products p ON o.product_id = p.id
-                WHERE t.user_id = ? 
-                ORDER BY t.created_at DESC
-                LIMIT 10`,
+                `SELECT transactions.*, orders.gateway_transaction_id, orders.customer_name, orders.product_id, products.name, orders.payment_method FROM transactions LEFT JOIN orders ON transactions.order_id = orders.id LEFT JOIN products ON orders.product_id = products.id WHERE transactions.user_id = ? ORDER BY transactions.created_at DESC LIMIT 15`,
                 [usuario.id]
             );
 
-            // Formatar os dados
+            // Formatar os dados para o frontend
             const statements = transacoes.map(t => ({
                 id: t.id,
                 date: t.created_at,
                 type: t.type,
                 description: t.description ||
                     (t.type === 'sale' ? `Venda: ${t.product_name || 'Produto'}` :
-                        t.type === 'withdrawal' ? 'Saque' :
+                        t.type === 'withdrawal' ? 'Saque solicitado' :
                             t.type === 'commission' ? 'Comissão de afiliado' :
-                                t.type === 'refund' ? 'Reembolso' : t.type),
-                amount: t.amount,
+                                t.type === 'refund' ? 'Reembolso' :
+                                    t.type === 'chargeback' ? 'Chargeback' :
+                                        t.type),
+                amount: parseFloat(t.amount),
                 status: t.status,
                 customer: t.customer_name,
-                reference: t.gateway_transaction_id
+                reference: t.gateway_transaction_id,
+                payment_method: t.payment_method,
+                category: t.category
             }));
 
             this.enviarResposta('StatementDashboardResponse', {
                 success: true,
                 data: {
-                    statements
+                    statements,
+                    summary: {
+                        total_income: statements
+                            .filter(s => s.category === 'income' && s.status === 'completed')
+                            .reduce((sum, s) => sum + s.amount, 0),
+                        total_expense: statements
+                            .filter(s => s.category === 'expense' && s.status === 'completed')
+                            .reduce((sum, s) => sum + s.amount, 0),
+                        pending_amount: statements
+                            .filter(s => s.status === 'pending')
+                            .reduce((sum, s) => sum + s.amount, 0)
+                    }
                 }
             });
 
@@ -472,6 +691,186 @@ class NovoCliente {
                 success: false,
                 message: 'Erro ao carregar dados do extrato'
             });
+        }
+    }
+
+    async handleGetNotifications() {
+        try {
+            const usuario = await this.validarToken();
+
+            if (!usuario) {
+                return this.enviarResposta('GetNotificationsResponse', {
+                    success: false,
+                    message: 'Usuário não autenticado'
+                });
+            }
+
+            const { limit = 10, unread_only = false } = this.data;
+
+            let query = `
+            SELECT * FROM notifications 
+            WHERE user_id = ?
+        `;
+            const params = [usuario.id];
+
+            if (unread_only) {
+                query += ' AND read = FALSE';
+            }
+
+            query += ' ORDER BY created_at DESC LIMIT ?';
+            params.push(parseInt(limit));
+
+            const notifications = await this.db.query(query, params);
+
+            // Contar não lidas
+            const unreadCount = await this.db.query(
+                'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND `read` = 0',
+                [usuario.id]
+            );
+
+            this.enviarResposta('GetNotificationsResponse', {
+                success: true,
+                data: {
+                    notifications: notifications.map(n => ({
+                        ...n,
+                        data: n.data ? JSON.parse(n.data) : null
+                    })),
+                    unread_count: unreadCount[0].count
+                }
+            });
+
+        } catch (error) {
+            console.error('Erro ao buscar notificações:', error);
+            this.enviarResposta('GetNotificationsResponse', {
+                success: false,
+                message: 'Erro ao carregar notificações'
+            });
+        }
+    }
+
+    async handleMarkNotificationRead() {
+        try {
+            const usuario = await this.validarToken();
+console.log(usuario)
+            if (!usuario) {
+                return this.enviarResposta('MarkNotificationReadResponse', {
+                    success: false,
+                    message: 'Usuário não autenticado'
+                });
+            }
+
+            const { notification_id } = this.data;
+
+            if (!notification_id) {
+                return this.enviarResposta('MarkNotificationReadResponse', {
+                    success: false,
+                    message: 'ID da notificação é obrigatório'
+                });
+            }
+
+            await this.db.query(
+                'UPDATE notifications SET `read` = 1, read_at = NOW() WHERE id = ? AND user_id = ?',
+                [notification_id, usuario.id]
+            );
+
+            this.enviarResposta('MarkNotificationReadResponse', {
+                success: true,
+                message: 'Notificação marcada como lida'
+            });
+
+        } catch (error) {
+            console.error('Erro ao marcar notificação:', error);
+            this.enviarResposta('MarkNotificationReadResponse', {
+                success: false,
+                message: 'Erro ao marcar notificação'
+            });
+        }
+    }
+
+    async criarNotificacao(userId, type, title, message, data = null, priority = 'normal', orderId = null) {
+        try {
+            await this.db.query(
+                `INSERT INTO notifications 
+            (user_id, type, title, message, data, priority, order_id, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+                [
+                    userId,
+                    type,
+                    title,
+                    message,
+                    data ? JSON.stringify(data) : null,
+                    priority,
+                    orderId
+                ]
+            );
+
+            // Emitir evento Socket.IO para notificação em tempo real
+            if (this.socket) {
+                this.socket.to(`user_${userId}`).emit('new_notification', {
+                    type,
+                    title,
+                    message,
+                    data,
+                    priority,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+        } catch (error) {
+            console.error('Erro ao criar notificação:', error);
+        }
+    }
+
+    async atualizarAnalyticsDiarios(userId, data = {}) {
+        try {
+            const hoje = new Date().toISOString().split('T')[0];
+
+            // Verificar se já existe registro para hoje
+            const existing = await this.db.query(
+                'SELECT id FROM analytics_daily WHERE user_id = ? AND date = ?',
+                [userId, hoje]
+            );
+
+            if (existing.length > 0) {
+                // Atualizar registro existente
+                const updateFields = [];
+                const updateValues = [];
+
+                Object.keys(data).forEach(key => {
+                    if (data[key] !== undefined) {
+                        updateFields.push(`${key} = ${key} + ?`);
+                        updateValues.push(data[key]);
+                    }
+                });
+
+                if (updateFields.length > 0) {
+                    updateValues.push(userId, hoje);
+                    await this.db.query(
+                        `UPDATE analytics_daily SET ${updateFields.join(', ')}, updated_at = NOW() 
+                     WHERE user_id = ? AND date = ?`,
+                        updateValues
+                    );
+                }
+            } else {
+                // Criar novo registro
+                const fields = ['user_id', 'date'];
+                const values = [userId, hoje];
+                const placeholders = ['?', '?'];
+
+                Object.keys(data).forEach(key => {
+                    fields.push(key);
+                    values.push(data[key]);
+                    placeholders.push('?');
+                });
+
+                await this.db.query(
+                    `INSERT INTO analytics_daily (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`,
+                    values
+                );
+            }
+
+        } catch (error) {
+            console.error('Erro ao atualizar analytics:', error);
         }
     }
 
@@ -609,17 +1008,17 @@ class NovoCliente {
             // Buscar saques
             const saques = await this.db.query(
                 `SELECT 
-                    w.*,
-                    b.bank_name,
-                    b.agency,
-                    b.account,
-                    b.account_type,
-                    b.holder_name
-                FROM withdrawals w
-                LEFT JOIN bank_accounts b ON w.bank_account_id = b.id
-                WHERE w.user_id = ? 
-                ORDER BY w.created_at DESC
-                LIMIT 20`,
+   withdrawals.*,
+   bank_accounts.bank_name,
+   bank_accounts.agency,
+   bank_accounts.account,
+   bank_accounts.account_type,
+   bank_accounts.holder_name
+FROM withdrawals
+LEFT JOIN bank_accounts ON withdrawals.bank_account_id = bank_accounts.id
+WHERE withdrawals.user_id = ? 
+ORDER BY withdrawals.created_at DESC
+LIMIT 20`,
                 [usuario.id]
             );
 
@@ -2151,6 +2550,201 @@ class NovoCliente {
 
         } catch (error) {
             console.error('[WEBHOOK] Erro ao atualizar estatísticas do produto:', error);
+        }
+    }
+
+
+    async handleForgotPassword() {
+        try {
+            const { email } = this.data;
+
+            if (!email) {
+                return this.enviarResposta('ForgotPasswordResponse', {
+                    success: false,
+                    message: 'Email é obrigatório'
+                });
+            }
+
+            // Validar formato do email
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return this.enviarResposta('ForgotPasswordResponse', {
+                    success: false,
+                    message: 'Email inválido'
+                });
+            }
+
+            // Verificar se o usuário existe
+            const usuarios = await this.db.query(
+                'SELECT id, name, email FROM users WHERE email = ?',
+                [email]
+            );
+
+            if (usuarios.length === 0) {
+                // Por segurança, não informamos se o email existe ou não
+                return this.enviarResposta('ForgotPasswordResponse', {
+                    success: true,
+                    message: 'Se este email estiver cadastrado, você receberá as instruções de recuperação'
+                });
+            }
+
+            const usuario = usuarios[0];
+
+            // Gerar token único de forma simples
+            const generateToken = () => {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                let token = '';
+                for (let i = 0; i < 32; i++) {
+                    token += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return token;
+            };
+
+            const token = generateToken();
+            const expiresAt = new Date(Date.now() + 3600000); // 1 hora
+
+            // Invalidar tokens anteriores para este email
+            await this.db.query(
+                'UPDATE password_reset_tokens SET used = TRUE WHERE email = ? AND used = FALSE',
+                [email]
+            );
+
+            // Inserir novo token
+            await this.db.query(
+                'INSERT INTO password_reset_tokens (user_id, email, token, expires_at) VALUES (?, ?, ?, ?)',
+                [usuario.id, email, token, expiresAt]
+            );
+
+            // Gerar link de recuperação
+            const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+
+            // Template do email
+            const emailHtml = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #2563eb;">Recuperação de Senha - For4 Payments</h2>
+                <p>Olá, ${usuario.name}!</p>
+                <p>Você solicitou a recuperação de senha para sua conta.</p>
+                <p>Clique no botão abaixo para criar uma nova senha:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="${resetLink}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                        Redefinir Senha
+                    </a>
+                </div>
+                <p>Ou copie e cole este link no seu navegador:</p>
+                <p style="background-color: #f3f4f6; padding: 10px; border-radius: 4px; word-break: break-all;">
+                    ${resetLink}
+                </p>
+                <p><strong>Este link expira em 1 hora.</strong></p>
+                <p>Se você não solicitou esta recuperação, ignore este email.</p>
+                <hr style="margin: 30px 0; border: none; border-top: 1px solid #e5e7eb;">
+                <p style="color: #6b7280; font-size: 12px;">
+                    For4 Payments - Sistema de Pagamentos
+                </p>
+            </div>
+        `;
+
+            // Enviar email
+            const enviou = await transporter.sendMail({
+                from: `"For4 Payments" <${process.env.SMTP_USER}>`,
+                to: email,
+                subject: 'Recuperação de Senha - For4 Payments',
+                html: emailHtml
+            });
+
+            console.log(enviou)
+            this.enviarResposta('ForgotPasswordResponse', {
+                success: true,
+                message: 'Se este email estiver cadastrado, você receberá as instruções de recuperação'
+            });
+
+        } catch (error) {
+            console.error('Erro ao solicitar recuperação de senha:', error);
+            this.enviarResposta('ForgotPasswordResponse', {
+                success: false,
+                message: 'Erro interno do servidor'
+            });
+        }
+    }
+
+    // Método para redefinir a senha
+    async handleResetPassword() {
+        try {
+            const { token, password, confirmPassword } = this.data;
+
+            if (!token || !password || !confirmPassword) {
+                return this.enviarResposta('ResetPasswordResponse', {
+                    success: false,
+                    message: 'Token e senhas são obrigatórios'
+                });
+            }
+
+            // Validar se as senhas coincidem
+            if (password !== confirmPassword) {
+                return this.enviarResposta('ResetPasswordResponse', {
+                    success: false,
+                    message: 'As senhas não coincidem'
+                });
+            }
+
+            // Validar senha (mínimo 6 caracteres)
+            if (password.length < 6) {
+                return this.enviarResposta('ResetPasswordResponse', {
+                    success: false,
+                    message: 'A senha deve ter pelo menos 6 caracteres'
+                });
+            }
+
+            // Buscar token válido
+            const tokens = await this.db.query(
+                `SELECT prt.*, u.id as user_id, u.email, u.name 
+             FROM password_reset_tokens prt 
+             JOIN users u ON prt.user_id = u.id 
+             WHERE prt.token = ? AND prt.used = FALSE AND prt.expires_at > NOW()`,
+                [token]
+            );
+
+            if (tokens.length === 0) {
+                return this.enviarResposta('ResetPasswordResponse', {
+                    success: false,
+                    message: 'Token inválido ou expirado'
+                });
+            }
+
+            const tokenData = tokens[0];
+
+            // Criptografar nova senha
+            const saltRounds = 10;
+            const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+            // Atualizar senha do usuário
+            await this.db.query(
+                'UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?',
+                [hashedPassword, tokenData.user_id]
+            );
+
+            // Marcar token como usado
+            await this.db.query(
+                'UPDATE password_reset_tokens SET used = TRUE, used_at = NOW() WHERE id = ?',
+                [tokenData.id]
+            );
+
+            // Invalidar todos os outros tokens do usuário
+            await this.db.query(
+                'UPDATE password_reset_tokens SET used = TRUE WHERE user_id = ? AND used = FALSE',
+                [tokenData.user_id]
+            );
+
+            this.enviarResposta('ResetPasswordResponse', {
+                success: true,
+                message: 'Senha alterada com sucesso!'
+            });
+
+        } catch (error) {
+            console.error('Erro ao redefinir senha:', error);
+            this.enviarResposta('ResetPasswordResponse', {
+                success: false,
+                message: 'Erro interno do servidor'
+            });
         }
     }
 
